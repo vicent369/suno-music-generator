@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suno API 音乐生成器</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin: 15px 0 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #09f;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .error {
+            color: #d32f2f;
+            padding: 10px;
+            background: #ffebee;
+            border-radius: 4px;
+        }
+        audio, img {
+            max-width: 100%;
+            margin-top: 10px;
+        }
+        .audio-player, .cover-image, .video-player {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        .download-btn, .video-btn {
+            display: inline-block;
+            background: #2196F3;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .download-btn:hover, .video-btn:hover {
+            background: #1976D2;
+        }
+        h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Suno API 音乐生成器</h1>
+        
+        <label for="prompt">音乐描述:</label>
+        <textarea id="prompt" placeholder="请输入音乐描述（必填）"></textarea>
+        
+        <label for="model">模型版本:</label>
+        <select id="model">
+            <option value="V3_5">V3.5</option>
+            <option value="V4" selected>V4</option>
+            <option value="V4_5">V4.5</option>
+        </select>
+        
+        <label>
+            <input type="checkbox" id="make_instrumental"> 
+            纯音乐（无人声）
+        </label>
+        
+        <label>
+            <input type="checkbox" id="is_public"> 
+            公开作品
+        </label>
+        
+        <button id="generate-btn" onclick="generateMusic()">生成音乐</button>
+        
+        <div id="loading" class="loading">
+            <p>音乐生成中，请稍候...</p>
+            <div class="spinner"></div>
+        </div>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function generateMusic() {
+            const prompt = document.getElementById('prompt').value;
+            const model = document.getElementById('model').value;
+            const make_instrumental = document.getElementById('make_instrumental').checked;
+            const is_public = document.getElementById('is_public').checked;
+            
+            const resultDiv = document.getElementById('result');
+            const loadingDiv = document.getElementById('loading');
+            const generateBtn = document.getElementById('generate-btn');
+            
+            if (!prompt) {
+                alert('请输入音乐描述！');
+                return;
+            }
+            
+            // 重置状态
+            resultDiv.innerHTML = '';
+            loadingDiv.style.display = 'block';
+            generateBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify({ 
+                        prompt,
+                        model,
+                        make_instrumental,
+                        is_public,
+                        wait_audio: false,
+                        custom_mode: false,
+                        is_custom: false
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.code !== 200) {
+                    throw new Error(data.msg || `请求失败: ${data.code}`);
+                }
+                
+                // 开始轮询状态
+                pollStatus(data.data.id);
+                
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                generateBtn.disabled = false;
+                showError(error.message);
+            }
+        }
+        
+        async function pollStatus(taskId, attempt=1) {
+            const resultDiv = document.getElementById('result');
+            const loadingDiv = document.getElementById('loading');
+            const maxAttempts = 20; // 增加最大尝试次数
+            
+            try {
+                const response = await fetch(`/api/status/${taskId}`);
+                const data = await response.json();
+                
+                if (data.code === 404) {
+                    // 任务还在处理中
+                    if (attempt >= maxAttempts) {
+                        throw new Error("生成超时，请稍后重试");
+                    }
+            
+                    // 显示进度信息
+                    loadingDiv.innerHTML = `
+                        <p>音乐生成中，请稍候... (尝试 ${attempt}/${maxAttempts})</p>
+                        <div class="spinner"></div>
+                    `;
+            
+                    // 指数退避策略
+                    const delay = Math.min(3000 * Math.pow(1.2, attempt - 1), 20000);
+                    setTimeout(() => pollStatus(taskId, attempt + 1), delay);
+                    return;
+                }
+
+                if (data.code !== 200) {
+                    throw new Error(data.msg || `状态查询失败: ${data.code}`);
+                }
+                
+                const statusData = data.data;
+                
+                if (statusData.status === "complete" || statusData.status === "succeeded" || statusData.status === "SUCCESS") {
+                    // 生成完成
+                    loadingDiv.style.display = 'none';
+                    document.getElementById('generate-btn').disabled = false;
+                    
+                    let html = '<h3>🎵 生成成功！</h3>';
+                    
+                    if (statusData.audio_url) {
+                        html += `
+                            <div class="audio-player">
+                                <h4>🎧 播放音乐</h4>
+                                <audio controls preload="metadata" style="width: 100%; max-width: 500px;">
+                                    <source src="${statusData.audio_url}" type="audio/mpeg">
+                                    您的浏览器不支持音频播放。
+                                </audio>
+                                <p><a href="${statusData.audio_url}" download target="_blank" class="download-btn">📥 下载音频文件</a></p>
+                            </div>
+                        `;
+                    } else {
+                        html += '<p>⚠️ 音频URL未找到，请稍后重试</p>';
+                    }
+                    
+                    if (statusData.image_url) {
+                        html += `
+                            <div class="cover-image">
+                                <h4>🖼️ 封面图片</h4>
+                                <img src="${statusData.image_url}" alt="音乐封面" style="max-width: 300px; border-radius: 8px;">
+                            </div>
+                        `;
+                    }
+                    
+                    if (statusData.video_url) {
+                        html += `
+                            <div class="video-player">
+                                <h4>🎬 视频版本</h4>
+                                <p><a href="${statusData.video_url}" target="_blank" class="video-btn">🎥 观看视频</a></p>
+                            </div>
+                        `;
+                    }
+                    
+                    resultDiv.innerHTML = html;
+                    
+                } else if (statusData.status === "processing" || statusData.status === "running" || statusData.status === "PENDING") {
+                    // 继续轮询 - 添加对PENDING状态的支持
+                    loadingDiv.innerHTML = `
+                        <p>音乐生成中，请稍候... (轮询中)</p>
+                        <div class="spinner"></div>
+                    `;
+                    setTimeout(() => pollStatus(taskId, attempt), 5000); // 增加轮询间隔
+                } else if (statusData.status === "failed" || statusData.status === "FAILED") {
+                    throw new Error("音乐生成失败，请重试");
+                } else {
+                    // 对于未知状态，继续轮询而不是报错
+                    console.log(`未知状态: ${statusData.status}，继续轮询...`);
+                    loadingDiv.innerHTML = `
+                        <p>音乐生成中，请稍候... (状态: ${statusData.status})</p>
+                        <div class="spinner"></div>
+                    `;
+                    setTimeout(() => pollStatus(taskId, attempt), 5000);
+                }
+                
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                document.getElementById('generate-btn').disabled = false;
+                showError(error.message);
+            }
+        }
+        
+        function showError(message) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `
+                <div class="error">
+                    <p>❌ ${message}</p>
+                    <button onclick="generateMusic()">重试</button>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
