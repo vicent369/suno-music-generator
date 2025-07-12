@@ -26,7 +26,7 @@ if __name__ == '__main__':
 # 首页路由
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index_new.html')
 
 # 音乐生成API
 @app.route('/api/generate', methods=['POST'])
